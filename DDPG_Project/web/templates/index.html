@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PER-DDPG 云-雾-边任务卸载系统</title>
+<script async src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.0/dist/socket.io.min.js"></script>
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/vis-network.min.js"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/vis-network.min.css" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh}
+.header{background:linear-gradient(135deg,#0d2137,#162840);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #58a6ff}
+.header h1{font-size:18px;color:#f0f6fc}.header .sub{font-size:12px;color:#8b949e;margin-left:12px}
+.bar{background:#161b22;padding:8px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #30363d}
+.btn{padding:7px 14px;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;transition:all .2s}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-go{background:#238636;color:#fff}.btn-pause{background:#d29922;color:#fff}
+.btn-resume{background:#1f6feb;color:#fff}.btn-step{background:#8b949e;color:#fff}.btn-reset{background:#da3633;color:#fff}
+.btn:hover:not(:disabled){filter:brightness(1.2)}
+.cg{display:flex;align-items:center;gap:5px;font-size:12px}.cg label{color:#8b949e}
+.cg select,.cg input{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:5px 8px;border-radius:4px;font-size:12px}
+.badge{display:inline-block;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600}
+.badge-run{background:#238636;color:#fff}.badge-pause{background:#d29922;color:#fff}
+.badge-idle{background:#484f58;color:#fff}.badge-done{background:#1f6feb;color:#fff}
+.tabs{display:flex;background:#161b22;border-bottom:1px solid #30363d;padding:0 24px}
+.tab{padding:10px 16px;cursor:pointer;font-size:13px;color:#8b949e;border-bottom:2px solid transparent}
+.tab:hover{color:#f0f6fc}.tab.on{color:#58a6ff;border-bottom-color:#58a6ff}
+.panel{display:none;padding:16px 24px}.panel.on{display:block}
+.mgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.mcard{background:#161b22;border-radius:8px;padding:14px;border:1px solid #30363d}
+.mcard .lbl{font-size:10px;color:#8b949e;text-transform:uppercase}
+.mcard .val{font-size:24px;font-weight:bold;color:#f0f6fc;margin-top:4px}
+.mcard .sub{font-size:10px;color:#8b949e;margin-top:2px}
+.cgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.cbox{background:#161b22;border-radius:8px;padding:12px;border:1px solid #30363d}
+.cbox h3{font-size:12px;color:#8b949e;margin-bottom:6px}
+.cbox canvas{max-height:200px}
+.dag-container{display:flex;gap:12px;height:500px}
+#dag-network{flex:1;background:#161b22;border-radius:8px;border:1px solid #30363d}
+.dag-side{width:320px;background:#161b22;border-radius:8px;padding:12px;border:1px solid #30363d;overflow-y:auto}
+.dag-side h3{font-size:13px;color:#58a6ff;margin-bottom:8px}
+.dag-item{font-size:11px;padding:4px 0;display:flex;justify-content:space-between;border-bottom:1px solid #30363d}
+.dag-item .k{color:#8b949e}.dag-item .v{color:#f0f6fc;font-weight:600}
+.tbl{width:100%;border-collapse:collapse;font-size:11px}
+.tbl th{background:#161b22;color:#8b949e;padding:6px 10px;text-align:left;border-bottom:2px solid #30363d;position:sticky;top:0}
+.tbl td{padding:5px 10px;border-bottom:1px solid #30363d}
+.tbl tr:hover{background:rgba(88,166,255,.05)}
+.tag{padding:2px 6px;border-radius:8px;font-size:10px;font-weight:600}
+.tag-pending{background:#484f58;color:#c9d1d9}.tag-ready{background:#1f6feb;color:#fff}
+.tag-executing{background:#d29922;color:#fff}.tag-completed{background:#238636;color:#fff}
+.node-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.node-card{background:#161b22;border-radius:6px;padding:10px;border:1px solid #30363d;font-size:11px}
+.node-card .name{font-size:13px;font-weight:600;margin-bottom:6px}
+.node-card .row{display:flex;justify-content:space-between;padding:2px 0}
+.node-card .row .kl{color:#8b949e}.node-card .row .vl{color:#f0f6fc}
+.prog{height:4px;background:#21262d;border-radius:2px;margin-top:3px;overflow:hidden}
+.prog .fill{height:100%;border-radius:2px}
+.fill-lo{background:#238636}.fill-md{background:#d29922}.fill-hi{background:#da3633}
+.log-box{background:#161b22;border-radius:8px;border:1px solid #30363d;max-height:450px;overflow-y:auto;padding:10px}
+.log-e{font-size:11px;padding:4px 6px;border-bottom:1px solid #30363d}
+.log-e .s{color:#58a6ff}.log-e .v{color:#f0f6fc}
+#loading{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center}
+#loading.show{display:flex}
+.spin{width:30px;height:30px;border:3px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div><h1>PER-DDPG 云-雾-边协同任务卸载</h1><span class="sub">| DAG依赖任务 | 优先经验回放 | LD-Noise自适应探索</span></div>
+  <div>
+    <span id="badge" class="badge badge-idle">空闲</span>
+    <span style="font-size:12px;color:#8b949e;margin-left:10px">Episode: <strong id="epCnt">0</strong> | 任务: <strong id="taskProg">0/0</strong></span>
+  </div>
+</div>
+
+<div class="bar">
+  <button class="btn btn-go" id="btnGo" onclick="go()">▶ 训练</button>
+  <button class="btn btn-pause" id="btnPause" onclick="pause()" disabled>⏸ 暂停</button>
+  <button class="btn btn-resume" id="btnResume" onclick="resume()" disabled>▶ 继续</button>
+  <button class="btn btn-step" id="btnStep" onclick="step()">⏭ 单步</button>
+  <button class="btn btn-reset" id="btnReset" onclick="reset()">↺ 重置</button>
+  <div class="cg"><label>模式:</label>
+    <select id="modeSel" onchange="setMode()">
+      <option value="train">训练(Train)</option>
+      <option value="eval">评估(Eval, 无噪声)</option>
+    </select>
+  </div>
+  <div class="cg"><label>速度:</label>
+    <input type="range" id="speed" min="0.01" max="0.5" step="0.01" value="0.05" oninput="setSpeed()">
+    <span id="speedLbl">0.05s</span>
+  </div>
+  <div class="cg"><label>平均奖励(最近100):</label><strong id="avgRew" style="color:#238636">--</strong></div>
+</div>
+
+<div class="tabs">
+  <div class="tab on" onclick="swTab('dash')">📊 训练仪表盘</div>
+  <div class="tab" onclick="swTab('dag')">🔗 DAG依赖图</div>
+  <div class="tab" onclick="swTab('tasks')">📋 子任务表</div>
+  <div class="tab" onclick="swTab('nodes')">🖥 计算节点</div>
+  <div class="tab" onclick="swTab('train')">📈 训练日志</div>
+  <div class="tab" onclick="swTab('experiments')">实验对比</div>
+</div>
+
+<!-- Dashboard -->
+<div class="panel on" id="pnl-dash">
+  <div class="mgrid">
+    <div class="mcard"><div class="lbl">Episode奖励</div><div class="val" id="mcReward">0</div><div class="sub">当前Episode累计</div></div>
+    <div class="mcard"><div class="lbl">全局完工时延 (Makespan)</div><div class="val" id="mcMakespan">0s</div><div class="sub">max(FT_i), 越小越好</div></div>
+    <div class="mcard"><div class="lbl">探索噪声 η</div><div class="val" id="mcEta">0.5</div><div class="sub">LD-Noise线性衰减</div></div>
+    <div class="mcard"><div class="lbl">经验池/Buffer</div><div class="val" id="mcBuf">0</div><div class="sub">容量20000</div></div>
+  </div>
+  <div class="cgrid">
+    <div class="cbox"><h3>Episode奖励曲线</h3><canvas id="chReward"></canvas></div>
+    <div class="cbox"><h3>Makespan收敛曲线</h3><canvas id="chMakespan"></canvas></div>
+    <div class="cbox"><h3>探索噪声η衰减</h3><canvas id="chEta"></canvas></div>
+    <div class="cbox"><h3>Critic / Actor Loss</h3><canvas id="chLoss"></canvas></div>
+  </div>
+  <div class="cbox" style="margin-top:12px">
+    <h3>最近20个 Episode <span id="historySource" style="font-size:10px;font-weight:400;color:#8b949e"></span></h3>
+    <div style="max-height:260px;overflow:auto">
+      <table class="tbl"><thead><tr><th>Episode</th><th>累计奖励</th><th>Makespan(s)</th></tr></thead><tbody id="historyBody"><tr><td colspan="3" style="text-align:center;color:#8b949e">等待训练数据...</td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- DAG Graph -->
+<div class="panel" id="pnl-dag">
+  <div class="dag-container">
+    <div id="dag-network"></div>
+    <div class="dag-side" id="dagSide">
+      <h3>调度序列 (List_seq)</h3>
+      <div id="seqInfo" style="font-size:11px;color:#8b949e;">等待仿真开始...</div>
+      <div id="taskDetail" style="margin-top:10px;font-size:11px;color:#8b949e;">点击DAG节点查看子任务详情</div>
+    </div>
+  </div>
+</div>
+
+<!-- Task Table -->
+<div class="panel" id="pnl-tasks">
+  <div style="max-height:480px;overflow-y:auto">
+    <table class="tbl"><thead><tr>
+      <th>ID</th><th>数据量(KB)</th><th>计算密度</th><th>状态</th><th>分配节点</th><th>分配CPU</th><th>开始→完成</th><th>传输/等待/执行</th><th>优先级W_i</th><th>前驱→后继</th>
+    </tr></thead><tbody id="taskBody"><tr><td colspan="10" style="text-align:center;color:#8b949e">等待仿真...</td></tr></tbody></table>
+  </div>
+</div>
+
+<!-- Compute Nodes -->
+<div class="panel" id="pnl-nodes">
+  <div class="node-grid" id="nodeGrid"></div>
+</div>
+
+<!-- Training Log -->
+<div class="panel" id="pnl-train">
+  <div class="log-box" id="logBox"><div style="text-align:center;color:#8b949e;padding:30px">等待训练数据...</div></div>
+</div>
+
+<div class="panel" id="pnl-experiments">
+  <div class="cbox">
+    <h3>本地复现实验结果</h3>
+    <p id="expProvenance" style="font-size:11px;color:#d29922;margin-bottom:10px">尚未生成实验数据</p>
+    <table class="tbl"><thead><tr><th>算法</th><th>平均Makespan(s)</th><th>标准差</th><th>样本数</th><th>训练更新</th></tr></thead><tbody id="expBody"></tbody></table>
+  </div>
+</div>
+
+<div id="loading"><div class="spin"></div></div>
+
+<script>
+let socket, dagNet, charts={}, metrics=[], history={rewards:[],makespans:[]}, nodeStates=[], dagData=null, listSeq=[];
+
+function init(){
+  loadState();
+  loadExperiments();
+  initVisualLibraries();
+  initSocket();
+}
+function initVisualLibraries(attempt=0){
+  if(!charts.reward&&typeof Chart!=='undefined'){
+    try{initCharts();updateCharts()}catch(err){console.warn('Chart initialization unavailable:',err)}
+  }
+  if(!dagNet&&typeof vis!=='undefined'){
+    try{initDAG();if(dagData)renderDAG()}catch(err){console.warn('DAG visualization unavailable:',err)}
+  }
+  if((!charts.reward||!dagNet)&&attempt<40)setTimeout(()=>initVisualLibraries(attempt+1),250);
+}
+function initSocket(attempt=0){
+  if(socket)return;
+  if(typeof io==='undefined'){
+    if(attempt<40)setTimeout(()=>initSocket(attempt+1),250);
+    return;
+  }
+  socket=io.connect('http://'+document.domain+':'+location.port);
+  socket.on('sim_step',d=>{handleStep(d)});
+  socket.on('episode_end',d=>{handleEnd(d)});
+  socket.on('sim_error',d=>{alert('Error: '+d.message)});
+  socket.on('training_complete',d=>{
+    document.getElementById('badge').className='badge badge-done';
+    document.getElementById('badge').textContent='训练完成';
+    updateBtns(false);
+  });
+}
+
+function loadExperiments(){
+  fetch('/api/experiments/latest').then(r=>r.ok?r.json():null).then(d=>{
+    if(!d)return;
+    document.getElementById('expProvenance').textContent=`${d.provenance}; profile=${d.profile}, seed=${d.seed}`;
+    let algorithms=d.data||{};
+    document.getElementById('expBody').innerHTML=Object.entries(algorithms).map(([name,result])=>`<tr><td>${name}</td><td>${result.mean_makespan.toFixed(4)}</td><td>${result.std_makespan.toFixed(4)}</td><td>${(result.samples||[]).length}</td><td>${result.training?result.training.train_updates:'-'}</td></tr>`).join('');
+  });
+}
+function loadState(){
+  Promise.all([
+    fetch('/api/simulation/state').then(r=>r.json()),
+    fetch('/api/simulation/metrics').then(r=>r.json())
+  ]).then(([d,rawMetrics])=>{
+    if(d.nodes){nodeStates=d.nodes;renderNodes()}
+    if(d.dag){dagData=d.dag;listSeq=d.list_seq||[];renderDAG();renderTasks();renderSeq()}
+    if(d.progress){updateProgress(d.progress)}
+    if(d.history){history=d.history}
+    document.getElementById('historySource').textContent=d.history_provenance?`数据来源：${d.history_provenance}`:'';
+    metrics=(rawMetrics||[]).map((m,i)=>({
+      step:i+1,reward:m.reward,eta:m.eta,
+      closs:(m.train||{}).critic_loss||0,
+      aloss:(m.train||{}).actor_loss||0
+    }));
+    updateCharts();
+  });
+}
+function initCharts(){
+  let o={responsive:true,maintainAspectRatio:false,animation:{duration:100},
+    scales:{x:{ticks:{color:'#8b949e',font:{size:9}}},y:{ticks:{color:'#8b949e',font:{size:9}}}}};
+  charts.reward=new Chart(document.getElementById('chReward'),{type:'line',data:{labels:[],datasets:[
+    {label:'Episode Reward',data:[],borderColor:'#58a6ff',tension:.3}
+  ]},options:o});
+  charts.makespan=new Chart(document.getElementById('chMakespan'),{type:'line',data:{labels:[],datasets:[
+    {label:'Makespan(s)',data:[],borderColor:'#da3633',tension:.3}
+  ]},options:o});
+  charts.eta=new Chart(document.getElementById('chEta'),{type:'line',data:{labels:[],datasets:[
+    {label:'η',data:[],borderColor:'#d29922',tension:.3}
+  ]},options:o});
+  charts.loss=new Chart(document.getElementById('chLoss'),{type:'line',data:{labels:[],datasets:[
+    {label:'Critic Loss',data:[],borderColor:'#f78166'},
+    {label:'Actor Loss',data:[],borderColor:'#7ee787'}
+  ]},options:o});
+}
+function initDAG(){
+  let c=document.getElementById('dag-network');
+  dagNet=new vis.Network(c,{nodes:new vis.DataSet([]),edges:new vis.DataSet([])},{
+    nodes:{shape:'dot',size:20,font:{color:'#c9d1d9',size:11}},
+    edges:{arrows:'to',color:{color:'#30363d'},smooth:{type:'curvedCW',roundness:.2}},
+    physics:{enabled:true,solver:'hierarchicalRepulsion'},
+    layout:{hierarchical:{direction:'LR',sortMethod:'directed'}}
+  });
+  dagNet.on('click',p=>{if(p.nodes.length){showTaskDetail(p.nodes[0])}});
+}
+function renderDAG(){
+  if(!dagData||!dagNet)return;
+  let ns=[],es=[],tasks=dagData.subtasks||[],N=dagData.N||0;
+  for(let i=0;i<N;i++){
+    let t=tasks[i]||{},st=t.status||'pending',cl='#484f58';
+    if(st==='completed')cl='#238636';else if(st==='executing')cl='#d29922';else if(st==='ready')cl='#1f6feb';
+    ns.push({id:i,label:'I'+i+' '+(t.name||'')+'\n'+((t.data_size_kb||0).toFixed(0))+'KB',color:{background:cl,border:'#30363d'}});
+  }
+  for(let e of(dagData.edges||[])){
+    es.push({from:e[0],to:e[1],label:(e[2]||0).toFixed(1)+'KB',font:{size:8,color:'#8b949e'}});
+  }
+  dagNet.setData({nodes:new vis.DataSet(ns),edges:new vis.DataSet(es)});
+}
+function showTaskDetail(tid){
+  if(!dagData)return;
+  let t=dagData.subtasks[tid],pred=t.predecessors.join(',')||'无',succ=t.successors.join(',')||'无';
+  document.getElementById('taskDetail').innerHTML=`
+    <div class="dag-item"><span class="k">子任务 I${t.id}</span><span class="v" style="color:#58a6ff">${t.status}</span></div>
+    <div class="dag-item"><span class="k">数据量</span><span class="v">${(t.data_size_kb||0).toFixed(1)} KB</span></div>
+    <div class="dag-item"><span class="k">计算密度</span><span class="v">${t.compute_density||0}</span></div>
+    <div class="dag-item"><span class="k">最小CPU</span><span class="v">${(t.min_cpu||0).toFixed(2)} GHz</span></div>
+    <div class="dag-item"><span class="k">分配节点</span><span class="v">${t.assigned_node||'--'}</span></div>
+    <div class="dag-item"><span class="k">分配CPU</span><span class="v">${(t.allocated_cpu||0).toFixed(3)} GHz</span></div>
+    <div class="dag-item"><span class="k">就绪时间</span><span class="v">${(t.ready_time||0).toFixed(3)}s</span></div>
+    <div class="dag-item"><span class="k">静态rank</span><span class="v">${(t.rank||0).toFixed(2)}</span></div>
+    <div class="dag-item"><span class="k">紧迫性</span><span class="v">${(t.urgency||0).toFixed(4)}</span></div>
+    <div class="dag-item"><span class="k">调度优先级W_i</span><span class="v" style="color:#d29922">${(t.schedule_priority||0).toFixed(4)}</span></div>
+    <div class="dag-item"><span class="k">前驱</span><span class="v" style="font-size:10px">[${pred}]</span></div>
+    <div class="dag-item"><span class="k">后继</span><span class="v" style="font-size:10px">[${succ}]</span></div>`;
+}
+function renderSeq(){
+  let el=document.getElementById('seqInfo');
+  if(!listSeq||listSeq.length===0){el.innerHTML='<span style="color:#8b949e">无序列</span>';return}
+  el.innerHTML=listSeq.map((tid,i)=>{
+    let t=dagData.subtasks[tid],st=t.status||'pending',cl=st==='completed'?'#238636':st==='executing'?'#d29922':'#8b949e';
+    return `<div style="padding:2px 0;font-size:11px"><span style="color:#58a6ff">[${i+1}]</span> I${tid} <span style="color:${cl}">${st}</span> W=${(t.schedule_priority||0).toFixed(3)}</div>`;
+  }).join('');
+}
+function renderTasks(){
+  if(!dagData)return;
+  let tasks=dagData.subtasks||[];
+  document.getElementById('taskBody').innerHTML=tasks.map(t=>{
+    let stCl='tag-pending';if(t.status==='completed')stCl='tag-completed';else if(t.status==='executing')stCl='tag-executing';else if(t.status==='ready')stCl='tag-ready';
+    return`<tr><td>I${t.id}<br><span style="font-size:9px;color:#8b949e">${t.name||''}</span></td><td>${(t.data_size_kb||0).toFixed(1)}</td><td>${t.compute_density||0}</td>
+    <td><span class="tag ${stCl}">${t.status||'pending'}</span></td><td>${t.assigned_node||'--'}</td>
+    <td>${(t.allocated_cpu||0).toFixed(3)}</td><td>${t.start_time==null?'--':t.start_time.toFixed(3)} → ${t.finish_time==null?'--':t.finish_time.toFixed(3)}</td>
+    <td>${((t.input_transfer_time||0)+(t.dependency_transfer_time||0)).toFixed(3)} / ${(t.wait_time||0).toFixed(3)} / ${(t.exec_time||0).toFixed(3)}</td><td>${(t.schedule_priority||0).toFixed(4)}</td>
+    <td style="font-size:10px">[${(t.predecessors||[]).join(',')}]→[${(t.successors||[]).join(',')}]</td></tr>`;
+  }).join('');
+}
+function renderNodes(){
+  if(!nodeStates||nodeStates.length===0){document.getElementById('nodeGrid').innerHTML='<div style="color:#8b949e;padding:20px">等待数据...</div>';return}
+  let colors={cloud:'#58a6ff',fog:'#d29922',edge:'#7ee787'};
+  document.getElementById('nodeGrid').innerHTML=nodeStates.map(n=>{
+    let u=n.cpu_usage*100,qCl=u>80?'fill-hi':u>50?'fill-md':'fill-lo';
+    return`<div class="node-card">
+      <div class="name" style="color:${colors[n.type]||'#c9d1d9'}">${n.id} <span style="font-size:10px;color:#8b949e">${n.type}</span></div>
+      <div class="row"><span class="kl">CPU总量</span><span class="vl">${(n.cpu_total||0).toFixed(1)} GHz</span></div>
+      <div class="row"><span class="kl">可用CPU</span><span class="vl">${(n.cpu_available||0).toFixed(2)} GHz</span></div>
+      <div class="row"><span class="kl">使用率</span><span class="vl">${u.toFixed(1)}%</span></div>
+      <div class="prog"><div class="fill ${qCl}" style="width:${u}%"></div></div>
+      <div class="row"><span class="kl">队列</span><span class="vl">${n.queue_length||0}</span></div>
+      <div class="row"><span class="kl">已处理</span><span class="vl">${n.total_processed||0}</span></div>
+    </div>`;
+  }).join('');
+}
+function handleStep(d){
+  let det=d.detail,prog=d.progress,snap=d.snapshot;
+  if(snap){nodeStates=snap.nodes||[];dagData=snap.dag;listSeq=snap.list_seq||[];renderNodes();renderDAG();renderTasks();renderSeq()}
+  if(prog){updateProgress(prog)}
+  if(det&&det.train_info){
+    metrics.push({step:det.step,reward:det.reward,eta:det.eta,closs:det.train_info.critic_loss,aloss:det.train_info.actor_loss});
+    if(metrics.length>200)metrics=metrics.slice(-200);
+    updateCharts();
+    let box=document.getElementById('logBox'),d=det.decision||{};
+    let loss=(det.train_info.critic_loss!==0||det.train_info.actor_loss!==0)
+      ?` <span style="color:#f78166">CL=${det.train_info.critic_loss.toFixed(4)}</span> <span style="color:#7ee787">AL=${det.train_info.actor_loss.toFixed(4)}</span>`:'';
+    let requestedRatio=d.requested_resource_ratio??d.resource_ratio??0;
+    let effectiveRatio=d.effective_resource_ratio??requestedRatio;
+    box.innerHTML+=`<div class="log-e"><span class="s">Step${det.step}/${det.total_steps}</span> I${d.task_id??'-'} → ${d.node_id||'--'}, CPU=${(requestedRatio*100).toFixed(1)}% → ${(effectiveRatio*100).toFixed(1)}% (${(d.allocated_cpu||0).toFixed(3)}GHz), FT=${(d.finish_time||0).toFixed(3)}s, R=${det.reward.toFixed(2)}, η=${det.eta.toFixed(3)}${loss}</div>`;
+    box.scrollTop=box.scrollHeight;
+  }
+}
+function handleEnd(d){
+  history=d.history||history;
+  updateProgress(d.progress);
+  updateCharts();
+  document.getElementById('badge').className='badge badge-done';
+  document.getElementById('badge').textContent='Episode完成';
+}
+function updateProgress(p){
+  if(!p)return;
+  document.getElementById('epCnt').textContent=p.total_episodes;
+  document.getElementById('mcReward').textContent=p.latest_reward.toFixed(2);
+  document.getElementById('mcMakespan').textContent=(p.latest_makespan||0).toFixed(3)+'s';
+  document.getElementById('mcEta').textContent=(p.noise_eta||0).toFixed(3);
+  document.getElementById('mcBuf').textContent=p.buffer_size||0;
+  document.getElementById('avgRew').textContent=(p.recent_avg_reward||0).toFixed(2);
+}
+function updateCharts(){
+  if(history.rewards.length>0&&charts.reward&&charts.makespan){
+    let labels=history.rewards.map((_,i)=>i+1);
+    charts.reward.data.labels=labels;charts.reward.data.datasets[0].data=history.rewards;charts.reward.update('none');
+    if(history.makespans.length>0){charts.makespan.data.labels=labels;charts.makespan.data.datasets[0].data=history.makespans;charts.makespan.update('none')}
+  }
+  if(metrics.length>0&&charts.eta&&charts.loss){
+    let sl=metrics.map(m=>m.step);
+    charts.eta.data.labels=sl;charts.eta.data.datasets[0].data=metrics.map(m=>m.eta);charts.eta.update('none');
+    charts.loss.data.labels=sl;
+    charts.loss.data.datasets[0].data=metrics.map(m=>m.closs);
+    charts.loss.data.datasets[1].data=metrics.map(m=>m.aloss);
+    charts.loss.update('none');
+  }
+  let body=document.getElementById('historyBody');
+  if(history.rewards.length>0){
+    let start=Math.max(0,history.rewards.length-20),rows=[];
+    for(let i=history.rewards.length-1;i>=start;i--){
+      rows.push(`<tr><td>${i+1}</td><td>${Number(history.rewards[i]).toFixed(4)}</td><td>${Number(history.makespans[i]||0).toFixed(4)}</td></tr>`);
+    }
+    body.innerHTML=rows.join('');
+  }else{
+    body.innerHTML='<tr><td colspan="3" style="text-align:center;color:#8b949e">等待训练数据...</td></tr>';
+  }
+}
+function go(){
+  fetch('/api/simulation/start',{method:'POST'}).then(()=>{
+    updateBtns(true);
+    document.getElementById('badge').className='badge badge-run';
+    document.getElementById('badge').textContent='训练中';
+  });
+}
+function pause(){
+  fetch('/api/simulation/pause',{method:'POST'}).then(()=>{
+    document.getElementById('badge').className='badge badge-pause';
+    document.getElementById('badge').textContent='已暂停';
+    document.getElementById('btnPause').disabled=true;
+    document.getElementById('btnResume').disabled=false;
+  });
+}
+function resume(){
+  fetch('/api/simulation/resume',{method:'POST'}).then(()=>{
+    document.getElementById('badge').className='badge badge-run';
+    document.getElementById('badge').textContent='训练中';
+    document.getElementById('btnPause').disabled=false;
+    document.getElementById('btnResume').disabled=true;
+  });
+}
+function step(){
+  showLoading();
+  fetch('/api/simulation/step',{method:'POST'}).then(r=>r.json()).then(d=>{
+    handleStep({detail:d,snapshot:null,progress:null});
+    loadState();
+    hideLoading();
+  });
+}
+function reset(){
+  fetch('/api/simulation/reset',{method:'POST'}).then(()=>{
+    metrics=[];history={rewards:[],makespans:[]};
+    updateBtns(false);
+    document.getElementById('badge').className='badge badge-idle';
+    document.getElementById('badge').textContent='空闲';
+    document.getElementById('epCnt').textContent='0';
+    document.getElementById('mcReward').textContent='0';
+    document.getElementById('mcMakespan').textContent='0s';
+    document.getElementById('logBox').innerHTML='<div style="text-align:center;color:#8b949e;padding:30px">等待训练数据...</div>';
+    resetCharts();
+    loadState();
+  });
+}
+function setMode(){fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:document.getElementById('modeSel').value})})}
+function setSpeed(){let v=parseFloat(document.getElementById('speed').value);document.getElementById('speedLbl').textContent=v.toFixed(2)+'s';fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:v})})}
+function swTab(n){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.querySelector(`.tab[onclick="swTab('${n}')"]`).classList.add('on');
+  document.getElementById('pnl-'+n).classList.add('on');
+  if(n==='dag'&&dagNet)setTimeout(()=>dagNet.redraw(),100);
+}
+function updateBtns(run){
+  document.getElementById('btnGo').disabled=run;
+  document.getElementById('btnPause').disabled=!run;
+  document.getElementById('btnResume').disabled=true;
+  document.getElementById('btnStep').disabled=run;
+}
+function resetCharts(){for(let k in charts){charts[k].data.labels=[];charts[k].data.datasets.forEach(ds=>ds.data=[]);charts[k].update('none')}}
+function showLoading(){document.getElementById('loading').classList.add('show')}
+function hideLoading(){document.getElementById('loading').classList.remove('show')}
+window.addEventListener('DOMContentLoaded',init);
+</script>
+</body>
+</html>
